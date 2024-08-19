@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Verknüpfer</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: left;
+            cursor: pointer; /* Indicate that the cell can be clicked */
+        }
+        td[contenteditable] {
+            background-color: #f9f9f9; /* Light background for editable cells */
+        }
+        #separator {
+            width: 5px; /* Set the width of the separator input to 5 pixels */
+        }
+    </style>
+   
+</head>
+<body>
+    <h1>CSV Verknüpfer</h1>
+    <label for="separator">Trennzeichen:</label>
+    <input type="text" id="separator" value=";" maxlength="1"> <!-- Limit input to one character -->
+    <br>
+    Zeiterfassung: <input type="file" id="csv1" accept=".csv"><br>
+    Lohnprogramm: <input type="file" id="csv2" accept=".csv"><br><br>
+    <button onclick="processFiles()">Verknüpfen und Anzeigen</button>
+    <button onclick="downloadCSV()" id="downloadBtn" style="display:none;">CSV Herunterladen</button>
+    <button onclick="location.reload(true);" id="resetBtn" style="display:none;">Reset</button>
+    <br><br>
+    Alle Daten werdden nur auf Ihrem Client bearbeitet. Ein Upload / zentrale Speicherung findet nicht statt.
+    <br><br>
+    
+    <div id="output"></div>
+
+    <script>
+        let mergedData = [];
+
+        async function processFiles() {
+            const file1 = document.getElementById('csv1').files[0];
+            const file2 = document.getElementById('csv2').files[0];
+            const separator = document.getElementById('separator').value || ';';
+
+            if (!file1 || !file2) {
+                alert('Bitte beide CSV-Dateien hochladen.');
+                return;
+            }
+
+            try {
+                //convertAndDownloadUTF8(file1);
+                //convertAndDownloadUTF8(file2);
+                
+                const [data1, data2] = await Promise.all([
+                    readCSV(file1, separator),
+                    readCSV(file2, separator)
+                ]);
+
+                mergedData = mergeCSVData(data1, data2);
+                const table = generateTable(mergedData);
+                document.getElementById('output').innerHTML = table;
+                document.getElementById('downloadBtn').style.display = 'inline'; // Show download button
+                document.getElementById('resetBtn').style.display = 'inline'; // Show reset button
+            } catch (error) {
+                alert('Fehler beim Verarbeiten der Dateien: ' + error.message);
+            }
+        }
+
+        function readCSV(file, separator) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    const text = event.target.result;
+                    // Split rows by newline and then by the specified separator
+                    const rows = text.split('\n').map(row => row.split(separator));
+                    resolve(rows);
+                };
+                reader.onerror = reject;
+                reader.readAsText(file, 'UTF-8'); // Ensure UTF-8 encoding
+            });
+        }
+
+        function mergeCSVData(data1, data2) {
+            const header1 = data1[0];
+            const rows1 = data1.slice(1);
+            const header2 = data2[0];
+            const rows2 = data2.slice(1);
+
+            const nameIndex1 = header1.indexOf('Nachname');
+            const vornameIndex1 = header1.indexOf('Vorname');
+            const nameIndex2 = header2.indexOf('Nachname');
+            const vornameIndex2 = header2.indexOf('Vorname');
+
+            // Combine headers from both CSV files, excluding duplicate columns
+            const mergedHeader = header1.concat(header2.filter((item, index) => index > 1));
+            const mergedData = [mergedHeader];
+
+            // Create a map for the second CSV file based on combined Vorname and Name
+            const data2Map = new Map();
+            rows2.forEach(row => {
+                const key = row[vornameIndex2] + ' ' + row[nameIndex2];
+                data2Map.set(key, row.slice(2));
+            });
+
+            // Merge data from the first CSV file with the mapped data from the second CSV file
+            rows1.forEach(row => {
+                const key = row[vornameIndex1] + ' ' + row[nameIndex1];
+                
+                const matchedRow = data2Map.get(key) || [];
+                mergedData.push(row.concat( matchedRow ));
+            
+            });
+
+            return mergedData;
+        }
+
+        function generateTable(data) {
+            let table = '<table><thead><tr>';
+            data[0].forEach(header => {
+                table += `<th>${header}</th>`;
+            });
+            table += '</tr></thead><tbody>';
+
+            data.slice(1).forEach((row, rowIndex) => {
+                table += '<tr>';
+                row.forEach((cell, cellIndex) => {
+                    table += `<td contenteditable="true" onblur="updateCell(${rowIndex}, ${cellIndex}, this.innerText)">${cell}</td>`;
+                });
+                table += '</tr>';
+            });
+
+            table += '</tbody></table>';
+            return table;
+        }
+
+        function updateCell(rowIndex, cellIndex, newValue) {
+            mergedData[rowIndex + 1][cellIndex] = newValue; // +1 to account for header row
+        }
+        
+        function downloadCSV() {
+            const csvContent = convertArrayToCSV(mergedData);
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'verknuepfte_daten.csv';
+            link.click();
+        }
+
+        function convertArrayToCSV(data) {
+            const separator = document.getElementById('separator').value || ';';
+            return data.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(separator)).join('\n');
+        }
+        
+          function convertAndDownloadUTF8(file) {
+            const reader = new FileReader();
+
+            reader.onload = function(event) {
+                // Read the file content
+                let text = event.target.result;
+
+                // Create a new Blob in UTF-8 format
+                const utf8Blob = new Blob([text], { type: 'text/csv;charset=utf-8;' });
+
+                // Create a download link
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(utf8Blob);
+                link.download = `converted_${file.name}`;
+                link.click();
+            };
+
+            // Read the file as text (assumes the file is in text format)
+            reader.readAsText(file);
+        }
+        
+        /*
+        function downloadCSV() {
+            const filteredData = filterDataBySozialversicherungsnummer(mergedData);
+            const csvContent = convertArrayToCSV(filteredData);
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'verknuepfte_daten.csv';
+            link.click();
+        }
+
+        function filterDataBySozialversicherungsnummer(data) {
+            const header = data[0];
+            const sozialversicherungsnummerIndex = header.indexOf('Sozialversicherungsnummer');
+
+            if (sozialversicherungsnummerIndex === -1) {
+                alert('Die Spalte "Sozialversicherungsnummer" wurde nicht gefunden.');
+                return data; // Return the original data if the column is not found
+            }
+
+            // Filter rows that have a non-empty value in the "Sozialversicherungsnummer" column
+            const filteredRows = data.filter((row, index) => {
+                // Keep the header row (index 0) or rows with a value in the Sozialversicherungsnummer column
+                return index === 0 || row[sozialversicherungsnummerIndex].trim() !== '';
+            });
+
+            return filteredRows;
+        }
+
+        function convertArrayToCSV(data) {
+            const separator = document.getElementById('separator').value || ';';
+            return data.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(separator)).join('\n');
+        }*/
+    </script>
+</body>
+</html>
